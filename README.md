@@ -237,3 +237,9 @@ tekbro/        Python app: orchestrator, Claude bridge, audio, screen, hotkeys, 
 native/        Swift helpers: system-audio capture, global hotkeys
 tests/         unit + live tests, latency diagnostics
 ```
+
+---
+
+## 📄 License
+
+[MIT](LICENSE) © 2026 Wellington Guedes
