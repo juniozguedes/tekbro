@@ -14,12 +14,13 @@
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system, system-ui, sans-serif; }
   header { display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:16px; margin:0 8px 0 0; }
+  header h1 { font-size:16px; margin:0 8px 0 0; display:flex; align-items:center; gap:8px; }
+  header .mascot { height:40px; width:auto; display:block; }
   header .meta { color:var(--muted); font-size:12px; }
   button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; font:inherit; }
   button:hover { border-color:var(--accent); }
   button.on { border-color:var(--ok); color:var(--ok); }
-  main { display:grid; grid-template-columns: minmax(0,2fr) minmax(280px,1fr); height:calc(100vh - 53px); }
+  main { display:grid; grid-template-columns: minmax(0,2fr) minmax(280px,1fr); height:calc(100vh - 61px); }
   #answers { overflow:auto; padding:16px; }
   aside { border-left:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
   aside img { width:100%; border-bottom:1px solid var(--line); display:block; }
@@ -39,7 +40,50 @@
 </head>
 <body>
 <header>
-  <h1>🤙 Tek Bro</h1>
+  <h1><svg class="mascot" aria-hidden="true" viewBox="100 76 400 334">
+    <line stroke="#9aa3b5" opacity=".5" x1="110" y1="400" x2="490" y2="400" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- the hug: bro's arm goes behind the nerd's back (drawn first, so the nerd covers it) -->
+    <path stroke="#e8b48f" fill="none" d="M310 250 Q258 262 204 268" stroke-width="30" stroke-linecap="round"/>
+
+    <!-- nerd -->
+    <path stroke="#f3c9a8" fill="none" d="M192 262 Q176 300 178 340" stroke-width="18" stroke-linecap="round"/>
+    <path fill="#5b8def" d="M185 290 Q185 245 230 245 Q275 245 275 290 L275 400 L185 400 Z"/>
+    <circle fill="#f3c9a8" cx="230" cy="190" r="42"/>
+    <g stroke="#1d2333" fill="none" stroke-width="4">
+      <circle cx="214" cy="192" r="13"/><circle cx="246" cy="192" r="13"/>
+      <line x1="227" y1="192" x2="233" y2="192"/>
+      <path d="M221 215 Q230 222 239 215" stroke-linecap="round"/>
+    </g>
+
+    <!-- bro -->
+    <path stroke="#e8b48f" fill="none" d="M452 245 Q474 290 470 340" stroke-width="30" stroke-linecap="round"/>
+    <path fill="#ff5a5f" d="M302 220 Q370 202 438 220 Q462 226 462 252 L448 400 L296 400 L280 252 Q280 226 302 220 Z"/>
+    <!-- chest muscles -->
+    <g fill="none" stroke="#d9434a" stroke-width="4" stroke-linecap="round">
+      <path d="M318 262 Q340 292 368 274"/>
+      <path d="M372 274 Q400 292 422 262"/>
+      <path d="M370 236 L370 270"/>
+    </g>
+    <circle fill="#e8b48f" cx="370" cy="152" r="46"/>
+    <!-- #1 cap -->
+    <path d="M408 134 Q440 131 454 141 Q432 147 408 145 Z" style="fill:#2b3350"/>
+    <path d="M323 140 Q324 96 370 94 Q416 96 417 140 Q370 132 323 140 Z" style="fill:#2b3350"/>
+    <text x="370" y="128" text-anchor="middle" font-family="Space Grotesk, system-ui, sans-serif" font-weight="700" font-size="24" style="fill:#ffffff">#1</text>
+    <!-- sunglasses -->
+    <g style="fill:#1d2333">
+      <path d="M336 144 H366 V152 Q366 164 352 164 Q338 164 336 152 Z"/>
+      <path d="M374 144 H404 V152 Q402 164 388 164 Q374 164 374 152 Z"/>
+      <rect x="330" y="142" width="80" height="5" rx="2.5"/>
+    </g>
+    <g fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity=".7">
+      <path d="M342 151 L350 151"/><path d="M380 151 L388 151"/>
+    </g>
+    <path stroke="#1d2333" fill="none" d="M354 176 Q370 190 386 176" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- the bro's hand wraps around to the nerd's far shoulder -->
+    <circle fill="#e8b48f" cx="194" cy="270" r="17"/>
+  </svg><span>Tek Bro</span></h1>
   <button id="solve">Solve screen (s)</button>
   <button id="answer">Answer last question (a)</button>
   <button id="autoScreen">Auto screen</button>
