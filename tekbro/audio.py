@@ -33,6 +33,8 @@ MIN_UTTERANCE_S = 0.6
 MIN_VOICED_S = 0.3        # at least this much actually-loud audio (filters clicks/echo blips)
 NO_SPEECH_MAX = 0.6       # drop Whisper segments it thinks are not speech…
 MIN_AVG_LOGPROB = -1.0    # …or that it is very unsure about (typical hallucinations)
+MAX_COMPRESSION = 2.4     # …or that is mostly repetition, e.g. "ვვვვვ…" from noise
+RESTART_DELAY_S = 2.0     # wait before restarting an interrupted capture helper
 
 ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "bin" / "tekbro-audio"
@@ -136,8 +138,10 @@ class Listener(threading.Thread):
         super().__init__(daemon=True, name=f"listener-{speaker}")
         self.speaker = speaker
         self.command: list[str] | None = None
+        self.restart = False
         if device == MACOS:
             self.command = [str(ensure_helper())] + (["--app", call_app] if call_app else [])
+            self.restart = True  # macOS may interrupt capture; bring it back
             self.device = None
         elif device and device.startswith("cmd:"):
             # Test hook: run a command that prints PCM. Off unless explicitly allowed.
@@ -168,21 +172,34 @@ class Listener(threading.Thread):
             ):
                 yield
             return
-        proc = subprocess.Popen(self.command, stdout=subprocess.PIPE)
-        assert proc.stdout
+        current: dict[str, subprocess.Popen] = {}
+        closing = threading.Event()
 
         def pump():
+            # macOS can interrupt a capture stream (another capture starting, sleep,
+            # device change). Restart the helper instead of going deaf for the session.
             nbytes = FRAME * 4  # float32
-            while chunk := proc.stdout.read(nbytes):
-                usable = len(chunk) - len(chunk) % 4
-                self.frames.put((time.monotonic(), np.frombuffer(chunk[:usable], dtype=np.float32).copy()))
-            print(f"[audio] {self.speaker} source exited (code {proc.wait()})")
+            while True:
+                proc = current["p"] = subprocess.Popen(self.command, stdout=subprocess.PIPE)
+                assert proc.stdout
+                while chunk := proc.stdout.read(nbytes):
+                    usable = len(chunk) - len(chunk) % 4
+                    self.frames.put((time.monotonic(), np.frombuffer(chunk[:usable], dtype=np.float32).copy()))
+                code = proc.wait()
+                if closing.is_set() or not self.restart:
+                    print(f"[audio] {self.speaker} source exited (code {code})")
+                    return
+                print(f"[audio] {self.speaker} source exited (code {code}), restarting in {RESTART_DELAY_S:.0f}s…")
+                if closing.wait(RESTART_DELAY_S):
+                    return
 
         threading.Thread(target=pump, daemon=True).start()
         try:
             yield
         finally:
-            proc.terminate()
+            closing.set()
+            if "p" in current:
+                current["p"].terminate()
 
     # ---------- main loop ----------
     def run(self):
@@ -232,6 +249,7 @@ class Listener(threading.Thread):
         text = " ".join(
             s.text.strip() for s in segments
             if s.no_speech_prob <= NO_SPEECH_MAX and s.avg_logprob >= MIN_AVG_LOGPROB
+            and s.compression_ratio <= MAX_COMPRESSION
         ).strip()
         if text:
             self.on_text(self.speaker, text)
