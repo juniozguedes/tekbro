@@ -331,7 +331,7 @@ def main():
     p.add_argument("--list-apps", action="store_true", help="list apps whose audio can be captured and exit")
     p.add_argument("--headphones", action="store_true", help="disable echo suppression (mic stays open while they talk)")
     p.add_argument("--no-hotkeys", action="store_true", help="disable global hotkeys (⌃⌥S solve screen, ⌃⌥A answer)")
-    p.add_argument("--monitor", type=int, help="monitor number for screenshots (1 = main)")
+    p.add_argument("--monitor", type=int, help="display for screenshots: 1 = main (default), 2 = second, 0 = all displays")
     p.add_argument("--interval", type=float, help="seconds between screenshots")
     p.add_argument("--model", help="Claude model: sonnet (default), opus, haiku, or a full model id")
     p.add_argument("--port", type=int)
@@ -354,7 +354,14 @@ def main():
     if args.call_app: cfg.call_app = args.call_app
     if args.headphones: cfg.echo_cancel = False
     if args.no_hotkeys: cfg.hotkeys = False
-    if args.monitor: cfg.monitor = args.monitor
+    if args.monitor is not None:  # 0 is valid (all displays), so don't test truthiness
+        cfg.monitor = args.monitor
+    if not args.no_screen:
+        import mss
+        with mss.mss() as sct:
+            displays = len(sct.monitors) - 1
+        if not 0 <= cfg.monitor <= displays:
+            p.error(f"--monitor {cfg.monitor}: this Mac has {displays} display(s); use 1-{displays}, or 0 for all")
     if args.interval: cfg.screen_interval = args.interval
     if args.model: cfg.model = args.model
     if args.port: cfg.port = args.port

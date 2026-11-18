@@ -166,7 +166,7 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 | `--headphones` | Disable echo suppression |
 | `--auto-screen` | Solve automatically whenever the screen changes |
 | `--interval SECONDS` | Screenshot interval (default 5) |
-| `--monitor N` | Which display to capture (1 = main) |
+| `--monitor N` | Which display to capture: `1` = main (default), `2` = second, `0` = all displays |
 | `--port N` | Dashboard port (default 8765) |
 | `--no-audio` / `--no-screen` / `--no-hotkeys` / `--no-dashboard` | Turn features off |
 | `--list-apps` / `--list-devices` | Show capturable apps / audio inputs |
@@ -186,7 +186,7 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 | `TEKBRO_AUTO_ANSWER` | `1` | Auto-answer detected questions |
 | `TEKBRO_AUTO_SCREEN` | `0` | Auto-solve on screen change |
 | `TEKBRO_SCREEN_INTERVAL` | `5` | Seconds between screenshots |
-| `TEKBRO_MONITOR` | `1` | Display to capture |
+| `TEKBRO_MONITOR` | `1` | Display to capture (`0` = all) |
 | `TEKBRO_HOTKEYS` | `1` | Global hotkeys on/off |
 | `TEKBRO_HOTKEY_SOLVE` | `ctrl+alt+s` | Solve-screen hotkey (`cmd`, `alt`, `ctrl`, `shift` + key) |
 | `TEKBRO_HOTKEY_ANSWER` | `ctrl+alt+a` | Answer-question hotkey |
