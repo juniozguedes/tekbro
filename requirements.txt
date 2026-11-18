@@ -7,3 +7,4 @@ mss==10.2.0
 Pillow==13.0.0
 fastapi==0.163.1
 uvicorn==0.54.0
+qrcode==8.2

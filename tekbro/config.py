@@ -47,4 +47,6 @@ class Config:
     # notification + sound when a hotkey answer is ready; TEKBRO_SOUNDS=1 clicks on hotkey press.
     notify: bool = os.getenv("TEKBRO_NOTIFY", "0") == "1"
     sounds: bool = os.getenv("TEKBRO_SOUNDS", "0") == "1"
+    # Serve the dashboard to your paired devices over Tailscale (see remote.py).
+    remote: bool = os.getenv("TEKBRO_REMOTE", "0") == "1"
     workdir: Path = field(default_factory=lambda: ROOT / "captures")

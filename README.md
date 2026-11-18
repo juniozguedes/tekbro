@@ -98,6 +98,31 @@ Tek Bro starts listening right away. 🎉
 
 ---
 
+## 📱 Dashboard on your phone or another computer
+
+Sharing your screen? Keep the shared screen clean and read Tek Bro's answers on your **own phone, tablet or second laptop**.
+
+It works through [Tailscale](https://tailscale.com), a free private network between your own devices. Tek Bro is **never exposed to the internet or your Wi-Fi**: only devices logged into your Tailscale account can connect, and each one must also be **paired** once.
+
+**One-time setup**
+1. Install Tailscale on the Mac and on your phone/laptop, and log in to the same account on both.
+2. Start Tek Bro with remote access:
+   ```bash
+   .venv/bin/python -m tekbro --remote
+   ```
+3. In the Tek Bro terminal, type `pair phone` and scan the **QR code** with your phone (or open the link on your laptop). The link works **once** and expires after 10 minutes.
+
+That's it: the device stays paired. Next time, just run `--remote` and open `http://<mac-tailscale-ip>:8765` on the device.
+
+| Command | What it does |
+|---|---|
+| `--remote` (or `TEKBRO_REMOTE=1`) | Also serve the dashboard to paired devices over Tailscale |
+| `pair NAME` (in the running terminal) or `--pair NAME` | One-time pairing link + QR code for a device |
+| `--devices` | List paired devices and when they were last seen |
+| `--revoke NAME` | Remove a device immediately (e.g. a lost phone) |
+
+---
+
 ## 🤖 Changing the AI model ("agent")
 
 Tek Bro uses **Claude Sonnet** by default: fast and more than enough for interview-style problems.
@@ -168,6 +193,8 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 | `--interval SECONDS` | Screenshot interval (default 5) |
 | `--monitor N` | Which display to capture: `1` = main (default), `2` = second, `0` = all displays |
 | `--port N` | Dashboard port (default 8765) |
+| `--remote` | Serve the dashboard to your paired devices over Tailscale |
+| `--pair NAME` / `--devices` / `--revoke NAME` | Pair, list or remove devices |
 | `--no-audio` / `--no-screen` / `--no-hotkeys` / `--no-dashboard` | Turn features off |
 | `--list-apps` / `--list-devices` | Show capturable apps / audio inputs |
 
@@ -193,6 +220,8 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 | `TEKBRO_NOTIFY` | `0` | macOS notification when a hotkey answer is ready |
 | `TEKBRO_SOUNDS` | `0` | Click sound on hotkey press |
 | `TEKBRO_PORT` | `8765` | Dashboard port |
+| `TEKBRO_REMOTE` | `0` | `1` = same as `--remote` |
+| `TEKBRO_HOME` | `~/.config/tekbro` | Where paired devices are stored |
 
 ---
 
@@ -201,7 +230,8 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 - **What stays on your Mac:** all audio and transcription, the screenshot loop, and the dashboard. Nothing is written to disk.
 - **What goes to Claude:** only the prompt for a specific request, meaning the recent transcript and/or one screenshot, sent through your own Claude Code login.
 - **Isolated Claude sessions:** Tek Bro runs Claude with **no tools, no MCP connectors, no plugins or hooks**, and without saving sessions. Text on your screen can't make it take actions.
-- **Locked-down dashboard:** localhost only, with a private per-run token, protection against malicious websites (DNS rebinding and cross-site requests), and sanitized rendering of every answer.
+- **Locked-down dashboard:** localhost only by default, with a private per-run token, protection against malicious websites (DNS rebinding and cross-site requests), and sanitized rendering of every answer.
+- **Remote access is opt-in and private:** with `--remote`, Tek Bro listens only on your Tailscale address (never Wi-Fi or the internet). Devices need a one-time pairing; only a hash of each device key is stored, devices can be revoked, and repeated failed attempts lock the sender out.
 - **Be fair to others:** Tek Bro transcribes other people's voices. Let participants know, and follow the recording-consent rules where you live and of the meeting you're in.
 
 ---
@@ -213,6 +243,7 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 | No `[them]` lines in the transcript | Run `./native/test-system-audio.sh`. It should print `OK`. If not, grant **Screen Recording** to your terminal and restart it |
 | No `[me]` lines | Grant **Microphone** to your terminal; check `--list-devices` |
 | "Unauthorized" in the browser | Open the full link printed in the terminal (it includes `?t=…`). The token changes every run |
+| Phone can't open the dashboard | Both devices must be on the same Tailscale account, Tek Bro must run with `--remote`, and the device must be paired (`pair NAME`) |
 | Hotkey does nothing | Another app may own that combo. Change it with `TEKBRO_HOTKEY_SOLVE=ctrl+alt+j` |
 | `Claude CLI failed` | Run `claude` once in your terminal and make sure you're logged in |
 | Answers are slow | Use `--model sonnet` (default) or `haiku`, and `TEKBRO_EFFORT=low` |
@@ -224,6 +255,7 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 
 ```bash
 .venv/bin/python tests/test_questions.py        # question detection (42 cases, EN+PT)
+.venv/bin/python tests/test_remote.py           # dashboard security: local token, Tailscale access, pairing
 .venv/bin/python tests/echo_test.py             # live echo test with real speakers + mic (plays sound)
 REAL=1 .venv/bin/python tests/echo_test.py      # same, with real macOS capture
 ./native/test-system-audio.sh                   # system-audio capture sanity check

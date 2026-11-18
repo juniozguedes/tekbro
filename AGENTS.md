@@ -33,6 +33,7 @@ tekbro/
                 silence-based utterance splitting, Whisper, EchoGate, echo text dedupe.
   questions.py  Question detection: sentence split, small-talk stripping, question cues (EN+PT).
   screen.py     ScreenWatcher: mss screenshots every N s, downscaled to ≤1568 px, change detection.
+  remote.py     Tailscale remote access: device pairing (one-time codes → hashed device tokens), lockout.
   hotkeys.py    HotkeyListener (runs bin/tekbro-hotkey) + optional macOS notifications.
   config.py     Config dataclass, read from env / .env (TEKBRO_*).
   static/       Dashboard (index.html) + vendored libs (marked, DOMPurify, highlight.js).
@@ -68,6 +69,14 @@ The dashboard exposes the screen and transcript, so `build_api`:
 - rejects non-GET requests with a foreign `Origin` (blocks CSRF),
 - serves vendored JS only (no CDN) and **sanitizes all Claude output with DOMPurify** (the model can echo attacker-controlled screen text).
 
+**Remote access (`--remote`, `remote.py`)** lets the owner read the dashboard on their own phone or laptop while screen-sharing:
+- binds **only** to `127.0.0.1` and the Mac's **Tailscale IP** (never `0.0.0.0`), and the middleware rejects any client outside loopback / Tailscale ranges,
+- remote clients must present a **paired device token** (the per-run token is local-only). Pairing uses one-time codes that expire after 10 min; only SHA-256 hashes are stored in `~/.config/tekbro/devices.json` (0600), and the file is re-read on change so `--pair` / `--revoke` work on a running instance,
+- `FailureLimiter` locks a client out after 10 failed attempts in 10 min.
+- Don't add a public-internet mode (ngrok, 0.0.0.0, etc.): the dashboard shows live screenshots and call transcripts.
+
+`tests/test_remote.py` covers all of this in-process; run it after touching `build_api` or `remote.py`.
+
 The `cmd:` audio source (runs a command) is a test hook, disabled unless `TEKBRO_ALLOW_CMD_SOURCE=1`.
 
 ## Running and testing
@@ -76,6 +85,7 @@ The `cmd:` audio source (runs a command) is a test hook, disabled unless `TEKBRO
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m tekbro                       # full app
 .venv/bin/python tests/test_questions.py         # question detection (fast, no audio)
+.venv/bin/python tests/test_remote.py            # dashboard security + device pairing (fast)
 .venv/bin/python tests/echo_test.py              # live speakers+mic echo test (plays sound!)
 REAL=1 .venv/bin/python tests/echo_test.py       # same, with real macOS capture (QuickTime as caller)
 ./native/test-system-audio.sh                    # helper sanity check → prints OK/FAIL

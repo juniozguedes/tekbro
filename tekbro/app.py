@@ -4,6 +4,7 @@ import asyncio
 import itertools
 import json
 import queue
+import re
 import secrets
 import sys
 import threading
@@ -18,6 +19,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response, Streamin
 
 from .brain import Brain
 from .config import Config
+from . import remote as R
 from .screen import ScreenWatcher
 
 STATIC = Path(__file__).parent / "static"
@@ -194,24 +196,39 @@ COOKIE = "tekbro_token"
 VENDOR = {p.name: p for p in (STATIC / "vendor").glob("*")}
 
 
-def build_api(j: TekBro, token: str) -> FastAPI:
-    """Local dashboard. Locked down because it exposes your screen and transcript:
-    - Host header must be localhost (blocks DNS-rebinding attacks from websites)
-    - every request needs the per-run token (URL printed in the terminal → cookie)
-    - the cookie is SameSite=Strict and POSTs must come from the same origin (blocks CSRF)
+def build_api(j: TekBro, token: str, ts: dict | None = None,
+              store: "R.DeviceStore | None" = None) -> FastAPI:
+    """Dashboard. Locked down because it exposes your screen and transcript:
+    - only this Mac (loopback) and, with --remote, devices in your Tailscale network can connect
+    - Host header must be one of our own names (blocks DNS-rebinding attacks from websites)
+    - this Mac: the per-run token (URL printed in the terminal → cookie)
+    - other devices: a paired device token (see remote.py), with lockout after repeated failures
+    - cookies are SameSite=Strict and POSTs must come from the same origin (blocks CSRF)
     """
     api = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    allowed_hosts = {f"127.0.0.1:{j.cfg.port}", f"localhost:{j.cfg.port}"}
+    port = j.cfg.port
+    allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    if ts:
+        allowed_hosts.add(f"{ts['ip']}:{port}")
+        if ts.get("dns"):
+            allowed_hosts |= {f"{ts['dns']}:{port}", f"{ts['dns'].split('.')[0]}:{port}"}
     allowed_origins = {f"http://{h}" for h in allowed_hosts}
+    limiter = R.FailureLimiter()
 
     @api.middleware("http")
     async def guard(request: Request, call_next):
+        client = request.client.host if request.client else None
+        local = R.is_loopback(client)
+        if not local and not (ts and store and R.is_tailnet(client)):
+            return Response("forbidden", status_code=403)
         if request.headers.get("host", "") not in allowed_hosts:
             return Response("forbidden host", status_code=403)
         if request.method != "GET":
             origin = request.headers.get("origin")
             if origin is not None and origin not in allowed_origins:
                 return Response("forbidden origin", status_code=403)
+        if not local:
+            return await remote_auth(request, client, call_next)
         query_token = request.query_params.get("t")
         if request.url.path == "/" and query_token and secrets.compare_digest(query_token, token):
             resp = RedirectResponse("/", status_code=303)  # drop the token from the address bar
@@ -219,6 +236,27 @@ def build_api(j: TekBro, token: str) -> FastAPI:
             return resp
         if not secrets.compare_digest(request.cookies.get(COOKIE, ""), token):
             return Response("Unauthorized: open the dashboard link printed in the Tek Bro terminal.",
+                            status_code=401)
+        return await call_next(request)
+
+    async def remote_auth(request: Request, client: str, call_next):
+        if limiter.blocked(client):
+            return Response("Too many failed attempts. Try again in a few minutes.", status_code=429)
+        if request.url.path == "/pair":
+            redeemed = store.redeem(request.query_params.get("c", ""))
+            if not redeemed:
+                limiter.fail(client)
+                return Response("This pairing link is invalid, expired or already used. "
+                                "Create a new one with `pair NAME` in the Tek Bro terminal.", status_code=401)
+            name, device_token = redeemed
+            print(f"[remote] paired device '{name}' ({client})", flush=True)
+            resp = RedirectResponse("/", status_code=303)  # drop the code from the address bar
+            resp.set_cookie(R.DEVICE_COOKIE, device_token, httponly=True, samesite="strict",
+                            max_age=R.DEVICE_COOKIE_MAX_AGE)
+            return resp
+        if not store.check(request.cookies.get(R.DEVICE_COOKIE, "")):
+            limiter.fail(client)
+            return Response("Unauthorized device: pair it first (type `pair NAME` in the Tek Bro terminal).",
                             status_code=401)
         return await call_next(request)
 
@@ -296,9 +334,9 @@ def build_api(j: TekBro, token: str) -> FastAPI:
     return api
 
 
-def terminal_loop(j: TekBro):
-    help_ = ("commands: [s] solve screen · [a] answer last question · "
-             "[t] toggle auto-screen · anything else = ask Claude (with screen) · [q] quit")
+def terminal_loop(j: TekBro, pair=None):
+    help_ = ("commands: [s] solve screen · [a] answer last question · [t] toggle auto-screen · "
+             "[pair NAME] pair a phone/laptop · anything else = ask Claude (with screen) · [q] quit")
     print(help_)
     for line in sys.stdin:
         cmd = line.strip()
@@ -314,6 +352,11 @@ def terminal_loop(j: TekBro):
             os._exit(0)
         elif cmd in ("h", "help", "?"):
             print(help_)
+        elif cmd == "pair" or cmd.startswith("pair "):
+            if pair:
+                pair(cmd[4:].strip() or "device")
+            else:
+                print("Remote access is off. Restart with --remote to pair devices.")
         elif cmd:
             j.ask(cmd)
 
@@ -335,7 +378,25 @@ def main():
     p.add_argument("--interval", type=float, help="seconds between screenshots")
     p.add_argument("--model", help="Claude model: sonnet (default), opus, haiku, or a full model id")
     p.add_argument("--port", type=int)
+    p.add_argument("--remote", action="store_true",
+                   help="also serve the dashboard to your paired devices over Tailscale")
+    p.add_argument("--pair", metavar="NAME", help="create a one-time pairing link/QR for a device and exit")
+    p.add_argument("--devices", action="store_true", help="list paired devices and exit")
+    p.add_argument("--revoke", metavar="NAME", help="remove a paired device and exit")
     args = p.parse_args()
+
+    store = R.DeviceStore()
+    if args.devices:
+        devs = store.devices()
+        if not devs:
+            print("No paired devices. Pair one with --pair NAME.")
+        for d in devs:
+            seen = time.strftime("%Y-%m-%d %H:%M", time.localtime(d["last_seen"]))
+            print(f"  {d['name']:<20} last seen {seen}")
+        return
+    if args.revoke:
+        print(f"Revoked '{args.revoke}'." if store.revoke(args.revoke) else f"No device named '{args.revoke}'.")
+        return
 
     if args.list_devices:
         import sounddevice as sd
@@ -365,10 +426,28 @@ def main():
     if args.interval: cfg.screen_interval = args.interval
     if args.model: cfg.model = args.model
     if args.port: cfg.port = args.port
+    if args.remote: cfg.remote = True
+
+    ts = None
+    if cfg.remote or args.pair:
+        ts = R.tailscale_info()
+        if not ts:
+            p.error("Tailscale isn't running on this Mac. Install it (https://tailscale.com/download), "
+                    "log in, and try again.")
+
+    def pair(name: str):
+        if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,40}", name):
+            print("Device name: up to 40 letters, digits, spaces, '-', '_' or '.'.")
+            return
+        R.print_pairing(name, R.pair_url(ts["ip"], cfg.port, store.create_pairing(name)))
+
+    if args.pair:
+        pair(args.pair)
+        return
 
     j = TekBro(cfg, use_audio=not args.no_audio, use_screen=not args.no_screen)
     j.start()
-    threading.Thread(target=terminal_loop, args=(j,), daemon=True).start()
+    threading.Thread(target=terminal_loop, args=(j, pair if cfg.remote else None), daemon=True).start()
 
     if args.no_dashboard:
         j.loop = None
@@ -376,7 +455,25 @@ def main():
     else:
         token = secrets.token_urlsafe(24)
         print(f"Dashboard: http://127.0.0.1:{cfg.port}/?t={token}", flush=True)
-        uvicorn.run(build_api(j, token), host="127.0.0.1", port=cfg.port, log_level="warning")
+        hosts = ["127.0.0.1"]
+        if cfg.remote:
+            hosts.append(ts["ip"])  # Tailscale only: never 0.0.0.0, so Wi-Fi/LAN can't reach it
+            n = len(store.devices())
+            print(f"Remote:    http://{ts['ip']}:{cfg.port}  (Tailscale only · {n} paired device(s) · "
+                  "type `pair NAME` to add one)", flush=True)
+        serve(build_api(j, token, ts if cfg.remote else None, store), cfg.port, hosts)
+
+
+def serve(api: FastAPI, port: int, hosts: list[str]):
+    """Run uvicorn on exactly these addresses (one listening socket each)."""
+    import socket
+    socks = []
+    for h in hosts:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((h, port))
+        socks.append(s)
+    uvicorn.Server(uvicorn.Config(api, log_level="warning")).run(sockets=socks)
 
 
 if __name__ == "__main__":

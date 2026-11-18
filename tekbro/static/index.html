@@ -36,6 +36,16 @@
   form { display:flex; gap:8px; padding:10px; border-top:1px solid var(--line); }
   input { flex:1; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px; font:inherit; }
   @media (max-width: 800px) { main { grid-template-columns:1fr; height:auto; } aside { border-left:0; border-top:1px solid var(--line); } }
+  /* Phone (paired over Tailscale): bigger tap targets, answers first, readable code. */
+  @media (max-width: 600px) {
+    main { grid-template-columns:minmax(0,1fr); } aside, #answers { min-width:0; }
+    header { padding:8px 12px; gap:8px; } header h1 { width:100%; } header .meta { width:100%; }
+    header button { flex:1 1 auto; padding:10px 12px; font-size:15px; }
+    form input { min-width:0; }
+    #answers { padding:10px; } .card { padding:10px 12px; } .card pre { font-size:13px; }
+    .card pre button.copy { padding:6px 12px; font-size:14px; }
+    #transcript { max-height:40vh; } input { font-size:16px; } /* 16px stops iOS zooming in */
+  }
 </style>
 </head>
 <body>
@@ -94,7 +104,7 @@
 <main>
   <section id="answers"></section>
   <aside>
-    <img id="shot" alt="latest screenshot">
+    <img id="shot" alt="" onerror="this.hidden=true" onload="this.hidden=false">
     <div id="transcript"></div>
     <form id="askForm"><input id="ask" placeholder="Ask Tek Bro (uses current screen)…" autocomplete="off"><button>Ask</button></form>
   </aside>
