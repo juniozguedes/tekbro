@@ -30,6 +30,7 @@
   .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin-bottom:14px; }
   .card h3 { margin:0 0 6px; font-size:12px; color:var(--muted); font-weight:500; display:flex; justify-content:space-between; }
   .card.none { opacity:.4; }
+  .card .heard { margin:0 0 8px; padding:6px 10px; border-left:3px solid var(--accent); background:rgba(127,127,127,.08); border-radius:0 6px 6px 0; font-style:italic; }
   .card pre { position:relative; border-radius:6px; overflow:auto; }
   .card pre button.copy { position:absolute; top:6px; right:6px; padding:2px 8px; font-size:12px; }
   .card h2 { font-size:14px; margin:12px 0 4px; color:var(--accent); }
@@ -142,6 +143,11 @@ es.onmessage = m => {
     c.className = 'card';
     c.innerHTML = `<h3><span></span><span>${new Date(ev.ts*1000).toLocaleTimeString()}</span></h3><div class="body">…</div>`;
     c.querySelector('h3 span').textContent = ev.title;
+    if (ev.heard) {  // the question being answered (plain text, never HTML)
+      const q = document.createElement('p');
+      q.className = 'heard'; q.textContent = '“' + ev.heard + '”';
+      c.querySelector('.body').before(q);
+    }
     cards[ev.id] = c; buffers[ev.id] = '';
     $('#answers').prepend(c);
   } else if (ev.type === 'delta' && cards[ev.id]) {
@@ -153,7 +159,7 @@ es.onmessage = m => {
     $('#usage').style.color = pct >= 80 ? '#f87171' : '';
   } else if (ev.type === 'job_end' && !cards[ev.id]) {
     // replayed after a reconnect: rebuild the card from the final text
-    es.onmessage({data: JSON.stringify({type: 'job_start', id: ev.id, title: ev.title || 'Answer', ts: ev.ts || Date.now() / 1000})});
+    es.onmessage({data: JSON.stringify({type: 'job_start', id: ev.id, title: ev.title || 'Answer', heard: ev.heard, ts: ev.ts || Date.now() / 1000})});
     buffers[ev.id] = ev.text; render(ev.id);
     if (ev.none) cards[ev.id].classList.add('none');
   } else if (ev.type === 'job_end' && cards[ev.id]) {

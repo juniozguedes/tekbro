@@ -20,6 +20,9 @@ Tek Bro is a **local, macOS-first live copilot for technical conversations**: in
 - **Pro-plan friendly.** Claude is only called on a hotkey or button, a typed question, or a detected question. **Auto-screen is off by default**; with it on, a live-coding session can burn the 5-hour Pro window in ~20–30 min.
 - **Sonnet by default.** Interview-style problems (LeetCode/HackerRank, concept questions) don't need Opus, and Sonnet is faster. Opus is an opt-in (`--model opus`).
 - **Local first.** Audio never leaves the machine (local Whisper). Screenshots and transcripts live in memory only. Only the specific prompt + screenshot for a request goes to Claude.
+- **Zero config.** It should just work: no flags for things Tek Bro can figure out itself (call language is learned and locked; echo suppression is always on and safe with headphones). Prefer automatic behavior over a new option.
+- **Never invent facts about the user.** Answers use only `profile.md` + `context/*.md`; anything missing becomes a placeholder like `[your notice period]`.
+- **Personal data never goes to the repo.** `profile.md`, `context/`, `.env`, `captures/` are gitignored. Commit only `profile.example.md` (fictional person). Check `git status` before any commit.
 
 ## Architecture
 
@@ -28,7 +31,8 @@ tekbro/
   app.py        Orchestrator: `TekBro` class (job queue + single worker), FastAPI dashboard,
                 terminal commands, CLI flags (main()).
   brain.py      Claude via `claude -p` (stream-json in/out, image input, streaming deltas,
-                timeout, plan-usage parsing). SYSTEM_PROMPT defines the answer format.
+                timeout, cancel, plan-usage parsing). SYSTEM_PROMPT defines the answer rules;
+                system_prompt() appends profile.md + context/*.md on every call.
   audio.py      Listener threads (mic via sounddevice, system audio via bin/tekbro-audio),
                 silence-based utterance splitting, Whisper, EchoGate, echo text dedupe.
   questions.py  Question detection: sentence split, small-talk stripping, question cues (EN+PT).
@@ -46,6 +50,12 @@ tests/          test_questions.py (unit), echo_test.py (live speakers/mic), stre
 ```
 
 **Data flow:** Listener → `_on_text` → transcript, plus question detection → `Job` queue → single worker → `Brain.ask` → `publish()` events → dashboard SSE (`/events`) + terminal.
+
+**What Claude sees (the user's personal info):** paths are fixed in `config.py` (`profile_path = ROOT/profile.md`, `context_dir = ROOT/context`). Before every call, `brain.system_prompt()` reads them fresh and builds:
+`SYSTEM_PROMPT` (rules) + `<profile>` (profile.md, or NO_PROFILE → placeholders) + one `<context file=…>` block per `context/*.md`. The transcript and screenshot go in the user message. Claude has no tools, so it never reads files itself; it only sees this text.
+- `profile.md` = facts about the user that hold in every call. `context/` = facts about this one call (JD, company notes); every file is used, so the user clears it between interviews.
+- Neither is read by coding agents or committed. `profile.example.md` (fictional person) is the committed template; keep it in sync if the expected sections change.
+- A newer question cancels an answer still streaming (`Brain.cancel()` → `Cancelled`), the card shows "Replaced by a newer question".
 
 **Speakers:** `them` = system audio (the only source that triggers auto-answers), `me` = mic, `audio` = the mic when there's no system-audio source.
 

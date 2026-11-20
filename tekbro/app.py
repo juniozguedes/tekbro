@@ -17,13 +17,13 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
-from .brain import Brain
+from .brain import Brain, Cancelled
 from .config import Config
 from . import remote as R
 from .screen import ScreenWatcher
 
 STATIC = Path(__file__).parent / "static"
-QUESTION_QUIET_S = 1.5      # wait this long after the last chunk before answering
+QUESTION_QUIET_S = 1.0      # wait this long after the last chunk before answering
 TRANSCRIPT_WINDOW_S = 180   # how much recent transcript to send with a question
 ECHO_DEDUPE_WAIT_S = 2.5    # hold "me" lines this long to compare with "them"
 ECHO_DEDUPE_WINDOW_S = 20   # compare against "them" lines within this window
@@ -36,6 +36,7 @@ class Job:
     prompt: str
     image: bytes | None = None
     notify: bool = False  # macOS notification when done (hotkey-triggered jobs)
+    heard: str | None = None  # the question being answered, shown on the card
 
 
 class TekBro:
@@ -48,6 +49,7 @@ class TekBro:
         self.subscribers: set[asyncio.Queue] = set()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.history: deque[dict] = deque(maxlen=200)
+        self.running: Job | None = None
         self._question_timer: threading.Timer | None = None
         self.listeners = []
         self.echo_gate = None
@@ -56,17 +58,19 @@ class TekBro:
             if use_screen else None
         )
         if use_audio:
-            from .audio import EchoGate, Listener
+            from .audio import EchoGate, LanguageLock, Listener
+            lang = LanguageLock(cfg.language)  # shared: "me" follows the language "them" speaks
             system = cfg.system_device if cfg.system_device not in (None, "", "off") else None
             self.echo_gate = EchoGate() if system and cfg.echo_cancel else None
             if system:
                 self.listeners.append(Listener("them", system, cfg.whisper_model, cfg.language,
                                                self._on_text, call_app=cfg.call_app,
-                                               echo_gate=self.echo_gate, role="reference"))
+                                               echo_gate=self.echo_gate, role="reference",
+                                               lang_lock=lang))
             # Without a "them" source, the mic is the only input, so treat it as the questioner.
             self.listeners.append(Listener("me" if system else "audio", cfg.mic_device,
                                            cfg.whisper_model, cfg.language, self._on_text,
-                                           echo_gate=self.echo_gate, role="gated"))
+                                           echo_gate=self.echo_gate, role="gated", lang_lock=lang))
 
     # ---------- events ----------
     def publish(self, event: dict):
@@ -126,14 +130,33 @@ class TekBro:
             return None
         return self.screen.latest_png or self.screen.capture()
 
+    def last_question(self) -> str | None:
+        """The line being answered: the latest question from the other side, else the latest line."""
+        from .audio import looks_like_question
+        cutoff = time.time() - TRANSCRIPT_WINDOW_S
+        recent = [(s, t) for ts, s, t in self.transcript if ts >= cutoff]
+        for pick in (lambda s, t: s != "me" and looks_like_question(t),
+                     lambda s, t: looks_like_question(t),
+                     lambda s, t: s != "me",
+                     lambda s, t: True):
+            for s, t in reversed(recent):
+                if pick(s, t):
+                    return t
+        return None
+
     def answer_question(self, notify: bool = False):
         convo = self.recent_transcript()
         if not convo:
             return
+        # A newer question replaces an answer still being written for an older one; the new
+        # answer sees the whole transcript, so nothing is lost and it starts right away.
+        running = self.running
+        if running and running.kind == "answer":
+            self.brain.cancel()
         self.jobs.put(Job("answer", "Question heard",
                           f"Live conversation transcript (most recent last):\n\n{convo}\n\n"
                           "Answer the most recent question. The screenshot shows my screen for context.",
-                          self.latest_screen(), notify=notify))
+                          self.latest_screen(), notify=notify, heard=self.last_question()))
 
     def solve_screen(self, notify: bool = False):
         png = self.screen.capture() if self.screen else None
@@ -158,18 +181,32 @@ class TekBro:
                 if superseded:
                     continue
             jid = next(self.ids)
-            self.publish({"type": "job_start", "id": jid, "kind": job.kind, "title": job.title, "ts": time.time()})
+            started = time.time()
+            self.publish({"type": "job_start", "id": jid, "kind": job.kind, "title": job.title,
+                          "heard": job.heard, "ts": started})
             print(f"\n\033[1;36m━━ Tek Bro · {job.title} ━━\033[0m")
+            if job.heard:
+                print(f"\033[2m“{job.heard}”\033[0m")
+            self.running = job
             try:
                 text = self.brain.ask(
                     job.prompt, job.image,
                     on_delta=lambda d, jid=jid: (self.publish({"type": "delta", "id": jid, "text": d}),
                                                  sys.stdout.write(d), sys.stdout.flush()),
+                    effort=self.cfg.answer_effort if job.kind == "answer" else None,
                 )
+            except Cancelled:
+                print("\n\033[2m[replaced by a newer question]\033[0m")
+                self.publish({"type": "job_end", "id": jid, "text": "_Replaced by a newer question._",
+                              "none": True, "title": job.title, "heard": job.heard, "ts": started})
+                continue
             except Exception as e:
                 text = f"**Error:** {e}"
+            finally:
+                self.running = None
             print()
-            self.publish({"type": "job_end", "id": jid, "text": text, "none": text.strip() == "NONE"})
+            self.publish({"type": "job_end", "id": jid, "text": text, "none": text.strip() == "NONE",
+                          "title": job.title, "heard": job.heard, "ts": started})
             if self.brain.usage:
                 self.publish({"type": "usage", **self.brain.usage})
             if job.notify and self.cfg.notify and text.strip() != "NONE":
@@ -372,7 +409,6 @@ def main():
     p.add_argument("--system", help="call audio source: 'macos' (default, native capture), 'off', or a loopback device like 'BlackHole'")
     p.add_argument("--call-app", help="only capture audio from this app, e.g. Teams, zoom, Chrome")
     p.add_argument("--list-apps", action="store_true", help="list apps whose audio can be captured and exit")
-    p.add_argument("--headphones", action="store_true", help="disable echo suppression (mic stays open while they talk)")
     p.add_argument("--no-hotkeys", action="store_true", help="disable global hotkeys (⌃⌥S solve screen, ⌃⌥A answer)")
     p.add_argument("--monitor", type=int, help="display for screenshots: 1 = main (default), 2 = second, 0 = all displays")
     p.add_argument("--interval", type=float, help="seconds between screenshots")
@@ -413,7 +449,6 @@ def main():
     if args.mic: cfg.mic_device = args.mic
     if args.system: cfg.system_device = args.system
     if args.call_app: cfg.call_app = args.call_app
-    if args.headphones: cfg.echo_cancel = False
     if args.no_hotkeys: cfg.hotkeys = False
     if args.monitor is not None:  # 0 is valid (all displays), so don't test truthiness
         cfg.monitor = args.monitor

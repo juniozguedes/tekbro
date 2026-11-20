@@ -8,6 +8,10 @@ Speaker-mode support (no headphones): the system-audio listener feeds an EchoGat
 with the times the call audio was playing; the mic listener mutes itself during
 those windows, so the other person's voice coming out of the speakers isn't
 transcribed a second time as "me". A text-level dedupe in app.py catches leftovers.
+
+Language: Whisper's per-chunk auto-detect can flip a chunk to another language
+(an accent is enough). A LanguageLock learns the call's language from the other
+person's speech and then pins both listeners to it. No setting needed.
 """
 import os
 import queue
@@ -115,6 +119,27 @@ class EchoGate:
         return False
 
 
+class LanguageLock:
+    """Learns the call's language from confident detections, then pins it."""
+
+    MIN_PROB = 0.8   # Whisper's confidence in its language guess
+    VOTES = 2        # agreeing confident chunks needed to lock
+
+    def __init__(self, fixed: str | None = None):
+        self.language = fixed
+        self._votes: list[str] = []
+        self._lock = threading.Lock()
+
+    def vote(self, lang: str, prob: float, words: int):
+        if self.language or prob < self.MIN_PROB or words < 4:
+            return
+        with self._lock:
+            self._votes = (self._votes + [lang])[-self.VOTES:]
+            if len(self._votes) == self.VOTES and len(set(self._votes)) == 1:
+                self.language = lang
+                print(f"[audio] call language: {lang}")
+
+
 class Listener(threading.Thread):
     """Transcribes one audio source.
 
@@ -134,6 +159,7 @@ class Listener(threading.Thread):
         call_app: str | None = None,
         echo_gate: EchoGate | None = None,
         role: str | None = None,
+        lang_lock: LanguageLock | None = None,
     ):
         super().__init__(daemon=True, name=f"listener-{speaker}")
         self.speaker = speaker
@@ -152,7 +178,7 @@ class Listener(threading.Thread):
         else:
             self.device = resolve_device(device)
         self.whisper_size = whisper_size
-        self.language = language
+        self.lang = lang_lock or LanguageLock(language)
         self.on_text = on_text
         self.gate = echo_gate
         self.role = role
@@ -243,19 +269,58 @@ class Listener(threading.Thread):
                             self._transcribe(model, audio)
 
     def _transcribe(self, model, audio: np.ndarray):
-        segments, _ = model.transcribe(
-            audio, language=self.language, vad_filter=True, beam_size=1,
+        segments, info = model.transcribe(
+            audio, language=self.lang.language, vad_filter=True, beam_size=1,
         )
         text = " ".join(
             s.text.strip() for s in segments
             if s.no_speech_prob <= NO_SPEECH_MAX and s.avg_logprob >= MIN_AVG_LOGPROB
             and s.compression_ratio <= MAX_COMPRESSION
         ).strip()
+        text = clean_transcript(text)
+        # Only the other side teaches the lock: your accent is what confuses the detector.
+        if self.speaker != "me":
+            self.lang.vote(info.language, info.language_probability, len(text.split()))
         if text:
             self.on_text(self.speaker, text)
 
 
 # ---------- text helpers ----------
+# Phrases Whisper invents on noise or silence (it was trained on lots of subtitled videos).
+HALLUCINATIONS = (
+    "for watching", "subscribe to", "like and subscribe", "next video", "subtitles by",
+    "obrigado por assistir", "legendas pela", "inscreva-se",
+)
+MAX_REPEATS = 2  # "Bye! Bye! Bye! Bye!" → "Bye! Bye!"
+
+
+def clean_transcript(text: str) -> str:
+    """Drop Whisper's typical hallucinations: stock video phrases and runaway repetition."""
+    import re
+    tokens = text.split()
+    norm = [re.sub(r"\W", "", t.lower()) for t in tokens]
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        for n in (1, 2, 3, 4):  # collapse an n-word group repeated more than MAX_REPEATS times
+            gram = norm[i:i + n]
+            if len(gram) < n or not any(gram):
+                continue
+            reps = 1
+            while norm[i + reps * n:i + (reps + 1) * n] == gram:
+                reps += 1
+            if reps > MAX_REPEATS:
+                out += tokens[i:i + n * MAX_REPEATS]
+                i += reps * n
+                break
+        else:
+            out.append(tokens[i])
+            i += 1
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(out))
+    keep = [x for x in sentences if not any(h in x.lower() for h in HALLUCINATIONS)]
+    return " ".join(keep).strip()
+
+
 def _words(text: str) -> list[str]:
     return [w for w in "".join(c.lower() if c.isalnum() else " " for c in text).split() if w]
 

@@ -40,7 +40,10 @@ python3 -m venv .venv
 # 2. Make sure Claude Code is logged in (one time). If `claude` opens normally, you're set.
 claude
 
-# 3. Run
+# 3. Tell Tek Bro about you (optional, recommended: answers use your real experience)
+cp profile.example.md profile.md
+
+# 4. Run
 .venv/bin/python -m tekbro
 ```
 
@@ -144,6 +147,44 @@ You can also change **how Tek Bro answers** (tone, format, language) by editing 
 
 ---
 
+## 🙋 Your personal info (so answers are about *you*)
+
+Tek Bro only knows what you tell it. You give it your info in **two places**, both in the project folder:
+
+| Where | What to put in it | When to update it |
+|---|---|---|
+| **`profile.md`** | **About you:** resume, projects, your role in each, real numbers, salary expectation, notice period, what you're looking for next | Rarely, when your career changes |
+| **`context/`** (any `.md` files) | **About this call:** the job description, notes about the company, the recruiter's email | Before each interview. Delete the old files after the call |
+
+The test: true in every interview → `profile.md`. True only for this company → `context/`.
+
+**Set it up:**
+
+```bash
+cp profile.example.md profile.md        # 1. copy the template, then fill it in with your info
+mkdir -p context                        # 2. before an interview, add that call's notes:
+pbpaste > context/job-description.md    #    e.g. copy the job description, then run this
+```
+
+Example before an interview:
+
+```
+tek-bro/
+├── profile.md                  ← you (filled once)
+└── context/
+    ├── job-description.md      ← this role's JD
+    └── notes.md                ← "Recruiter: Ana. Full-time in BRL or contractor in USD."
+```
+
+**How Tek Bro uses them:** before every answer, it opens `profile.md` and every `.md` file in `context/` and pastes their text into Claude's instructions, along with the recent transcript. Claude doesn't look for files itself; it just receives the text. That means:
+- **Edits apply to the next answer**, no restart needed.
+- **Every file in `context/` is used.** Leftovers from another company will get mixed in, so clear the folder between interviews.
+- **Nothing is invented.** Answers use only facts from these files. Anything missing shows as a placeholder like `[your notice period]`. Without a `profile.md`, personal questions get a structure with placeholders.
+
+**Your personal info never goes to the repo.** `profile.md` and `context/` are gitignored (so are `.env` and `captures/`). Only `profile.example.md` is committed, and it describes a fictional person.
+
+---
+
 ## 🎧 Audio setup
 
 By default Tek Bro captures **all system audio** as the other side of the call, and your **default mic** as you.
@@ -153,12 +194,13 @@ By default Tek Bro captures **all system audio** as the other side of the call, 
 .venv/bin/python -m tekbro --list-apps           # apps you can target
 .venv/bin/python -m tekbro --mic "MacBook"       # choose a mic (see --list-devices)
 .venv/bin/python -m tekbro --list-devices        # list mics / input devices
-.venv/bin/python -m tekbro --headphones          # keep your mic open while they talk
 .venv/bin/python -m tekbro --system off          # mic only
 .venv/bin/python -m tekbro --system BlackHole    # use a loopback device instead of native capture
 ```
 
-**Speakers vs headphones:** with speakers, Tek Bro mutes the mic while the other person is talking, so their voice isn't transcribed twice. The trade-off is that you aren't transcribed while you talk over them. On headphones, use `--headphones` to keep the mic always open.
+**Nothing to configure for your setup:**
+- **Speakers or headphones:** both work as is. Tek Bro mutes your mic while the other person talks, so their voice coming out of your speakers isn't transcribed as yours. On headphones, the only effect is that you aren't transcribed while talking over them. Headphones still give the cleanest transcript.
+- **Language:** Tek Bro learns the call's language from the other person's first sentences and locks both sides to it. Your accent won't flip your lines into another language.
 
 **Tip:** `--call-app` keeps Spotify, YouTube or notification sounds out of the transcript.
 
@@ -188,7 +230,6 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 | `--call-app NAME` | Only capture audio from this app |
 | `--system SRC` | Call audio source: `macos` (default), `off`, or a device name |
 | `--mic DEVICE` | Microphone (name or index) |
-| `--headphones` | Disable echo suppression |
 | `--auto-screen` | Solve automatically whenever the screen changes |
 | `--interval SECONDS` | Screenshot interval (default 5) |
 | `--monitor N` | Which display to capture: `1` = main (default), `2` = second, `0` = all displays |
@@ -203,13 +244,14 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 | Variable | Default | Description |
 |---|---|---|
 | `TEKBRO_MODEL` | `sonnet` | Claude model |
-| `TEKBRO_EFFORT` | `medium` | `low` / `medium` / `high` reasoning effort |
+| `TEKBRO_EFFORT` | `medium` | `low` / `medium` / `high` reasoning effort when solving the screen |
+| `TEKBRO_ANSWER_EFFORT` | `low` | Reasoning effort for answering heard questions (low = answers start in ~1 s) |
 | `TEKBRO_WHISPER_MODEL` | `small` | `base` (faster) · `small` · `medium` (more accurate) · `large-v3` |
-| `TEKBRO_LANGUAGE` | auto | Force a language, e.g. `en` or `pt` |
+| `TEKBRO_LANGUAGE` | learned | Force a language (`en`, `pt`…) instead of learning it from the call |
 | `TEKBRO_SYSTEM_AUDIO` | `macos` | `macos`, `off`, or a loopback device |
 | `TEKBRO_CALL_APP` | — | Only capture this app's audio |
 | `TEKBRO_MIC_DEVICE` | default mic | Mic name or index |
-| `TEKBRO_ECHO_CANCEL` | `1` | `0` = same as `--headphones` |
+| `TEKBRO_ECHO_CANCEL` | `1` | `0` = never mute the mic while the other person talks |
 | `TEKBRO_AUTO_ANSWER` | `1` | Auto-answer detected questions |
 | `TEKBRO_AUTO_SCREEN` | `0` | Auto-solve on screen change |
 | `TEKBRO_SCREEN_INTERVAL` | `5` | Seconds between screenshots |
@@ -228,7 +270,8 @@ On Pro there's no per-call cost, but there **are usage limits** (a rolling 5-hou
 ## 🔒 Privacy and security
 
 - **What stays on your Mac:** all audio and transcription, the screenshot loop, and the dashboard. Nothing is written to disk.
-- **What goes to Claude:** only the prompt for a specific request, meaning the recent transcript and/or one screenshot, sent through your own Claude Code login.
+- **What goes to Claude:** only the prompt for a specific request, meaning the recent transcript and/or one screenshot, plus your `profile.md` and `context/` notes, sent through your own Claude Code login.
+- **Personal files stay local and out of git:** `profile.md`, `context/`, `.env` and `captures/` are gitignored.
 - **Isolated Claude sessions:** Tek Bro runs Claude with **no tools, no MCP connectors, no plugins or hooks**, and without saving sessions. Text on your screen can't make it take actions.
 - **Locked-down dashboard:** localhost only by default, with a private per-run token, protection against malicious websites (DNS rebinding and cross-site requests), and sanitized rendering of every answer.
 - **Remote access is opt-in and private:** with `--remote`, Tek Bro listens only on your Tailscale address (never Wi-Fi or the internet). Devices need a one-time pairing; only a hash of each device key is stored, devices can be revoked, and repeated failed attempts lock the sender out.

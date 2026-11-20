@@ -6,3 +6,7 @@ bin/
 build/
 .DS_Store
 *.log
+
+# Personal: your profile and call notes never go to the repo
+profile.md
+context/

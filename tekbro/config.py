@@ -25,16 +25,18 @@ _load_dotenv()
 class Config:
     # "opus" / "sonnet" aliases resolve to the latest model your Claude plan allows
     model: str = os.getenv("TEKBRO_MODEL", "sonnet")
-    effort: str = os.getenv("TEKBRO_EFFORT", "medium")
+    effort: str = os.getenv("TEKBRO_EFFORT", "medium")            # solving code on screen
+    answer_effort: str = os.getenv("TEKBRO_ANSWER_EFFORT", "low")  # answering heard questions: speed first
     whisper_model: str = os.getenv("TEKBRO_WHISPER_MODEL", "small")
-    language: str | None = os.getenv("TEKBRO_LANGUAGE") or None  # None = auto-detect
+    # None = learn it from the other person's speech and lock it (see audio.LanguageLock).
+    language: str | None = os.getenv("TEKBRO_LANGUAGE") or None
     screen_interval: float = float(os.getenv("TEKBRO_SCREEN_INTERVAL", "5"))
     monitor: int = int(os.getenv("TEKBRO_MONITOR", "1"))
     mic_device: str | None = os.getenv("TEKBRO_MIC_DEVICE") or None
     # "macos" = native system-audio capture, "off" = disabled, or a loopback device name (e.g. BlackHole)
     system_device: str | None = os.getenv("TEKBRO_SYSTEM_AUDIO", "macos")
-    # Mute the mic while call audio plays (for speakers, no headphones). Turn off with headphones
-    # if you want to be heard while talking over the other person.
+    # Mute the mic while call audio plays, so speaker echo isn't transcribed as you. Safe with
+    # headphones too (you're just not transcribed while talking over them), so it stays on.
     echo_cancel: bool = os.getenv("TEKBRO_ECHO_CANCEL", "1") == "1"
     call_app: str | None = os.getenv("TEKBRO_CALL_APP") or None  # e.g. Teams, zoom, Chrome
     port: int = int(os.getenv("TEKBRO_PORT", "8765"))
@@ -50,3 +52,7 @@ class Config:
     # Serve the dashboard to your paired devices over Tailscale (see remote.py).
     remote: bool = os.getenv("TEKBRO_REMOTE", "0") == "1"
     workdir: Path = field(default_factory=lambda: ROOT / "captures")
+    # Your background (profile.md) and extra notes for the call (context/*.md, e.g. the job
+    # description). Both are gitignored; see profile.example.md.
+    profile_path: Path = field(default_factory=lambda: ROOT / "profile.md")
+    context_dir: Path = field(default_factory=lambda: ROOT / "context")
